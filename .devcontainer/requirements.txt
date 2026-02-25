@@ -1,0 +1,21 @@
+# Core dependencies for s101-openenc dev container
+# XML, sprite and styling utilities
+lxml
+xmltodict
+requests
+pyyaml
+
+# Testing
+pytest
+
+# Lua integration and Postgres client
+# Note: installing `lupa` may require LuaJIT or Lua dev headers on the system.
+lupa
+psycopg2-binary
+
+# Sprite atlas generation (replaces spritezero CLI)
+cairosvg
+Pillow
+
+# Add additional packages as needed
+
