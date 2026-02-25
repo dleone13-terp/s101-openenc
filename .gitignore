@@ -1,3 +1,4 @@
 portrayal
 **/__pycache__/
-**/out
+**/out/
+.claude/
