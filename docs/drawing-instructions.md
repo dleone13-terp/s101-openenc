@@ -30,38 +30,6 @@ A single feature may emit multiple `AddInstructions` calls. These are concatenat
 
 ---
 
-## Format Mismatch: Lua Output vs. parse_di.py
-
-The Lua portrayal rules emit **full instruction names**:
-
-```
-ViewingGroup:27010;DrawingPriority:24;ColorFill:DEPDW;PointInstruction:BOYCAR01
-```
-
-The current parser (`injest/parse_di.py`) expects **abbreviated codes** from `claude_oneshot.md`:
-
-```
-VG:27010;DP:24;AC:DEPDW;SY:BOYCAR01
-```
-
-These are **two different encodings**. The Lua output is the source of truth. The mapping between them:
-
-| Abbreviated | Full Instruction Name | Notes |
-|-------------|----------------------|-------|
-| `VG` | `ViewingGroup` | |
-| `DP` | `DrawingPriority` | |
-| `AC` | `ColorFill` | Not "AreaColour" |
-| `AP` | `AreaFillReference` | Not "AreaPattern" |
-| `LC` | *(no direct equivalent)* | Lua uses `SimpleLineStyle` or `LineStyle` with colour param |
-| `LS` | `LineStyle` / `LineInstruction` | Split into separate Dash + LineStyle or named LineInstruction |
-| `SY` | `PointInstruction` | |
-| `TX` | `TextInstruction` | Different parameter format |
-| `CS` | *(not emitted)* | Conditional symbology resolved within Lua, never in output |
-
-The parser must be rewritten to handle the full instruction names. There is no 1:1 mapping for all cases — the Lua format is significantly richer.
-
----
-
 ## Instruction Reference
 
 ### Display Control
@@ -779,36 +747,6 @@ Examples from the Lua unit tests:
 | `Double ampersand &&` | `Double ampersand &a&a` |
 
 The `EncodeString()` function in `S100Scripting.lua` handles formatting values and applying DEF encoding. It is used to encode text passed to `TextInstruction`.
-
----
-
-## Abbreviated Code Mapping
-
-For reference, the abbreviated encoding described in `claude_oneshot.md` and implemented in `injest/parse_di.py`:
-
-| Abbrev | Full Name | parse_di.py Field | Notes |
-|--------|-----------|-------------------|-------|
-| `VG` | `ViewingGroup` | `di.vg` | Integer |
-| `DP` | `DrawingPriority` | `di.dp` | Integer |
-| `AC` | `ColorFill` | `di.ac` | Colour token string |
-| `AP` | `AreaFillReference` | `di.ap` | Pattern name string |
-| `LC` | *(line colour)* | `di.lc` | No direct Lua equivalent; Lua uses `SimpleLineStyle` |
-| `LS` | `LineStyle` | `di.ls`, `di.lw`, `di.lc` | Abbreviated LS combines style+width+colour |
-| `SY` | `PointInstruction` | `di.sy` | Symbol name string |
-| `TX` | `TextInstruction` | `di.texts[]` | Different parameter format in Lua output |
-| `CS` | *(none)* | *(ignored)* | Conditional symbology resolved within Lua |
-
-The abbreviated format loses significant information present in the Lua output:
-- `DisplayPlane` (OverRadar/UnderRadar) is not represented
-- `AlertReference` is not represented
-- `Hover` interaction state is not represented
-- `SpatialReference` per-edge styling is not represented
-- Geometry augmentation instructions (`AugmentedRay`, `ArcByRadius`, etc.) are not represented
-- Font styling beyond colour and size is not represented
-- Temporal instructions (`Date`, `TimeValid`) are not represented
-- `NullInstruction` for pick-only features is not represented
-- `LineInstructionUnsuppressed` distinction is lost
-- `ScaleMinimum`/`ScaleMaximum` display range is not represented
 
 ---
 

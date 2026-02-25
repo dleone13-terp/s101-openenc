@@ -245,7 +245,7 @@ def build_all_styles():
         palette = load_palette(theme)
         palette_name = theme.value
         style = build_style(palette_name, palette)
-        output_path = out / f'enc-{palette_name}.json'
+        output_path = out / f'{palette_name}.json'
         output_path.write_text(json.dumps(style, indent=2))
         print(f"  ✓ Style written: {output_path}")
 
