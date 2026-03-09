@@ -88,9 +88,12 @@ def build_sprites():
     for theme in Theme:
         css = load_theme_css(theme)
 
-        # Output dir for resolved SVGs for this theme
-        resolved_dir = OUT_DIR / f'{theme.value}_src'
-        resolved_dir.mkdir(exist_ok=True)
+        # Output dir for resolved SVGs and sprite atlas for this theme.
+        # SVGs live alongside the pre-built atlas so Martin can serve them
+        # directly from the named directory (e.g. /sprites/Day).
+        theme_dir = OUT_DIR / theme.value
+        theme_dir.mkdir(exist_ok=True)
+        resolved_dir = theme_dir  # SVGs written into the same dir
 
         svg_files = list(SYMBOLS_DIR.glob('*.svg'))
         print(f"  Processing {len(svg_files)} symbols for theme '{theme.value}'")
@@ -100,8 +103,6 @@ def build_sprites():
             (resolved_dir / svg_path.name).write_text(resolved_svg, encoding='utf-8')
 
         # Build sprite atlas at 1x and 2x
-        theme_dir = OUT_DIR / theme.value
-        theme_dir.mkdir(exist_ok=True)
         sprite_prefix = str(theme_dir / 'sprite')
 
         build_atlas(resolved_dir, sprite_prefix, scale=1)

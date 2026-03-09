@@ -2,3 +2,5 @@ portrayal
 **/__pycache__/
 **/out/
 .claude/
+ENCS/
+fonts/

@@ -41,6 +41,20 @@ services:
       - db
     env_file:
         - .env
+    # Raise the open-file limit so Martin can build sprite sheets from
+    # the ~717 SVGs per theme without hitting EMFILE (os error 24).
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      # Config generated from martin/martin.yaml
+      - ../martin/martin.yaml:/martin.yaml:ro
+      # Sprite atlases built by: python -m sprites.build_sprites
+      - ../sprites/out:/sprites:ro
+      # Roboto (or other) PBF font shards – place in fonts/ at workspace root
+      - ../fonts:/fonts:ro
+      - ../style/out:/style:ro
     command: --config /martin.yaml --webui enable-for-all
 
   adminer:

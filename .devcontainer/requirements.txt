@@ -17,5 +17,8 @@ psycopg2-binary
 cairosvg
 Pillow
 
+#required for gdal build
+numpy
+
 # Add additional packages as needed
 
