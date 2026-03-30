@@ -33,6 +33,7 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list \
         libexpat1-dev \
         libxml2-dev \
         libcurl4-openssl-dev \
+        bison \
     && rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------------------------
@@ -51,11 +52,13 @@ RUN wget https://github.com/OSGeo/gdal/archive/refs/tags/v${GDAL_VERSION}.tar.gz
         -DBUILD_SHARED_LIBS=ON \
         -DBUILD_TESTING=OFF \
         -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF \
-        -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+        -DOGR_BUILD_OPTIONAL_DRIVERS=ON \
         -DOGR_ENABLE_DRIVER_S57=ON \
         -DGDAL_ENABLE_DRIVER_GTIFF=ON \
         -DGDAL_ENABLE_DRIVER_PNG=ON \
         -DGDAL_ENABLE_PYTHON=ON \
+        -DOGR_ENABLE_DRIVER_PGDUMP=ON \
+        -DOGR_ENABLE_DRIVER_PG=ON \
         -DPython3_EXECUTABLE=/usr/local/bin/python3 \
         -DPython3_FIND_STRATEGY=LOCATION \
     && make -j$(nproc) \

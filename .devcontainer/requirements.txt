@@ -13,10 +13,6 @@ pytest
 lupa
 psycopg2-binary
 
-# Sprite atlas generation (replaces spritezero CLI)
-cairosvg
-Pillow
-
 #required for gdal build
 numpy
 

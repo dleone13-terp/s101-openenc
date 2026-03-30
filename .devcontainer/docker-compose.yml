@@ -47,14 +47,14 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-    volumes:
+    #volumes:
       # Config generated from martin/martin.yaml
-      - ../martin/martin.yaml:/martin.yaml:ro
+      # - ../martin/martin.yaml:/martin.yaml:ro
       # Sprite atlases built by: python -m sprites.build_sprites
-      - ../sprites/out:/sprites:ro
+      #- ../sprites/out:/sprites:ro
       # Roboto (or other) PBF font shards – place in fonts/ at workspace root
-      - ../fonts:/fonts:ro
-      - ../style/out:/style:ro
+      #- ../fonts:/fonts:ro
+      #- ../style/out:/style:ro
     command: --config /martin.yaml --webui enable-for-all
 
   adminer:
