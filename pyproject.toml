@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "s101-openenc"
+version = "0.1.0"
+description = "S-57 to S-101 ingestion and portrayal utilities"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Day Leone" }]
+license = { text = "MIT" }
+dependencies = [
+    "lxml",
+    "xmltodict",
+    "requests",
+    "PyYAML",
+    "lupa",
+    "psycopg2-binary",
+    "numpy"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
+
+dynamic = []
+
+[tool.setuptools.packages.find]
+include = [
+    "injest",
+    "injest.*",
+    "portrayal_engine",
+    "portrayal_engine.*"
+]

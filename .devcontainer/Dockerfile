@@ -3,13 +3,6 @@ FROM mcr.microsoft.com/devcontainers/python:1-3.11-bullseye
 ENV PYTHONUNBUFFERED=1
 
 # --------------------------------------------------------------------
-# Install Python dependencies early (better layer caching)
-# --------------------------------------------------------------------
-COPY requirements.txt /tmp/pip-tmp/
-RUN pip3 --disable-pip-version-check --no-cache-dir install -r /tmp/pip-tmp/requirements.txt \
-    && rm -rf /tmp/pip-tmp
-
-# --------------------------------------------------------------------
 # Base system dependencies
 # --------------------------------------------------------------------
 RUN rm -f /etc/apt/sources.list.d/yarn.list \
@@ -25,8 +18,6 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list \
         wget \
         cmake \
         swig \
-        python3-dev \
-        python3-numpy \
         libproj-dev \
         libgeos-dev \
         libsqlite3-dev \
@@ -35,6 +26,10 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list \
         libcurl4-openssl-dev \
         bison \
     && rm -rf /var/lib/apt/lists/*
+
+# Ensure NumPy is available for the Python used by GDAL bindings (Python 3.11 in the base image).
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir numpy
 
 # --------------------------------------------------------------------
 # Build GDAL from source (vector-focused minimal build)

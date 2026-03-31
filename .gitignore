@@ -4,3 +4,6 @@ portrayal
 .claude/
 ENCS/
 fonts/
+.venv/
+/.devcontainer/requirements.txt
+*.egg-info

@@ -14,7 +14,21 @@
 	},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	"forwardPorts": ["adminer:8080", "martin:3000"]
+	"forwardPorts": ["adminer:8080", "martin:3000"],
+
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"python.defaultInterpreterPath": "/workspaces/${localWorkspaceFolderBasename}/.venv/bin/python",
+				"python.testing.pytestEnabled": true,
+				"python.testing.pytestArgs": [
+					"tests"
+				]
+			}
+		}
+	},
+
+	"postCreateCommand": "rm -rf .venv && python -m venv --system-site-packages .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install --force-reinstall pytest && .venv/bin/pip install -e ."
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "rustc --version",

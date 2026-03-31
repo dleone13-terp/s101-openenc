@@ -64,3 +64,4 @@ services:
       - db
     environment:
       - ADMINER_DEFAULT_SERVER=db
+      - ADMINER_PLUGINS=json-column tables-filter tinymce
