@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Protocol, Sequence
+from time import perf_counter
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Protocol, Sequence
 
 from lupa import LuaRuntime
 
@@ -12,7 +14,7 @@ RULES_DIR = Path("portrayal/PortrayalCatalog/Rules")
 # Opinionated fixed context parameters (ingest-time, not mariner configurable here).
 DEFAULT_CONTEXT: Mapping[str, Any] = {
     "SafetyContour": 4.0,
-    "SafetyDepth": -100.0,
+    "SafetyDepth": 0.0,
     "ShallowContour": 2.0,
     "DeepContour": 6.0,
     "DisplayDepthUnits": 1,
@@ -20,6 +22,54 @@ DEFAULT_CONTEXT: Mapping[str, Any] = {
     "SimplifiedSymbols": False,
     "RadarOverlay": False,
     "PlainBoundaries": False,
+}
+
+# Attributes that are enumerations in the S-101 catalogue; keep them as numbers
+# when sending into Lua so catalogue comparisons (e.g., colour == 3) behave.
+ENUMERATED_ATTRIBUTES: set[str] = {
+    "buoyShape",
+    "categoryOfLateralMark",
+    "categoryOfCardinalMark",
+    "categoryOfSpecialPurposeMark",
+    "categoryOfObstruction",
+    "categoryOfWreck",
+    "categoryOfWeedKelp",
+    "categoryOfCoastline",
+    "categoryOfShorelineConstruction",
+    "categoryOfAnchorage",
+    "colour",
+    "qualityOfPosition",
+    "qualityOfSoundingMeasurement",
+    "techniqueOfSoundingMeasurement",
+    "waterLevelEffect",
+}
+
+# Attributes that may legitimately carry multiple values.
+MULTIVALUED_ATTRIBUTES: set[str] = {
+    "colour",
+    "featureName",
+    "information",
+}
+
+COMMON_OPTIONAL_ATTRIBUTES: set[str] = {"featureName", "information"}
+FEATURE_OPTIONAL_ATTRIBUTES: dict[str, set[str]] = {
+    "DepthArea": {"depthRangeMinimumValue", "depthRangeMaximumValue", "restriction"},
+    "UnderwaterAwashRock": {"defaultClearanceDepth", "surroundingDepth", "waterLevelEffect"},
+    "Obstruction": {"defaultClearanceDepth", "surroundingDepth", "waterLevelEffect"},
+    "Wreck": {"defaultClearanceDepth", "surroundingDepth", "waterLevelEffect"},
+    "SeabedArea": {"waterLevelEffect", "surfaceCharacteristics"},
+    "ShorelineConstruction": {
+        "condition",
+        "categoryOfShorelineConstruction",
+        "waterLevelEffect",
+    },
+}
+BUOY_CODES: set[str] = {
+    "LateralBuoy",
+    "CardinalBuoy",
+    "IsolatedDangerBuoy",
+    "SafeWaterBuoy",
+    "SpecialPurposeGeneralBuoy",
 }
 
 
@@ -33,13 +83,23 @@ class FeatureRecord:
     attributes: Dict[str, Any]
     spatial_id: str | None = None
 
-    def to_simple_attribute(self, attribute_code: str) -> List[str]:
+    def to_simple_attribute(self, attribute_code: str) -> List[Any]:
         value = self.attributes.get(attribute_code)
         if value is None:
             return []
         if isinstance(value, (list, tuple)):
-            return [str(v) for v in value]
-        return [str(value)]
+            return [self._coerce_attribute_value(v) for v in value]
+        return [self._coerce_attribute_value(value)]
+
+    @staticmethod
+    def _coerce_attribute_value(value: Any) -> Any:
+        if isinstance(value, bytes):
+            return value.decode("utf-8", "replace")
+        if isinstance(value, (list, tuple)):
+            return list(value)
+        if isinstance(value, (bool, int, float, str, dict)):
+            return value
+        return str(value)
 
 
 @dataclass
@@ -50,7 +110,7 @@ class PortrayalResult:
 
 
 class FeatureSource(Protocol):
-    def __iter__(self) -> Iterable[FeatureRecord]:
+    def __iter__(self) -> Iterator[FeatureRecord]:
         ...
 
 
@@ -80,87 +140,73 @@ class PortrayalHost:
     Currently geared toward ingest-time portrayal of raw S-57 features mapped to S-101 names.
     """
 
-    def __init__(self, context: Mapping[str, Any] | None = None):
+    def __init__(self, context: Mapping[str, Any] | None = None, *, debug: bool = False):
         self.context = dict(DEFAULT_CONTEXT)
         if context:
             self.context.update(context)
+        self.debug = debug
 
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self._features: Dict[str, FeatureRecord] = {}
         self._spatial_index: Dict[str, FeatureRecord] = {}
-        self._emitted: Dict[str, List[str]] = {}
+        self._emitted: MutableMapping[str, List[str]] = defaultdict(list)
         self._debug_logs: List[str] = []
         self._feature_type_codes: List[str] = []
         self._simple_attribute_codes: List[str] = []
         self._feature_attribute_bindings: Dict[str, set[str]] = {}
         self._attribute_value_types: Dict[str, str] = {}
+        self._last_portray_timing: Dict[str, float] = {}
 
         self._setup_lua()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def portray(self, features: Iterable[FeatureRecord]) -> Dict[str, List[str]]:
+    def portray(self, features: Iterable[FeatureRecord], *, profile: bool = False) -> Dict[str, List[str]]:
         """Run portrayal for the provided features and return DEF strings per feature_id."""
+        start_total = perf_counter() if profile else 0.0
+        t_after_list = 0.0
+        t_after_metadata = 0.0
+        t_after_types = 0.0
+        t_after_context = 0.0
         feature_list = list(features)
+        if profile:
+            t_after_list = perf_counter()
         self._features = {f.feature_id: f for f in feature_list}
         self._spatial_index = {}
-        self._emitted = {}
-        self._feature_type_codes = sorted({f.code for f in feature_list})
-        self._simple_attribute_codes = sorted(
-            {attr for f in feature_list for attr in f.attributes.keys()}
-        )
-        self._feature_attribute_bindings = {
-            code: {attr for f in feature_list if f.code == code for attr in f.attributes}
-            for code in self._feature_type_codes
-        }
+        self._emitted = defaultdict(list)
+        self._initialize_feature_type_metadata(feature_list)
+        self._apply_optional_attribute_bindings()
+        if profile:
+            t_after_metadata = perf_counter()
         self._attribute_value_types = self._infer_attribute_value_types(feature_list)
-
-        # DepthArea rule expects restriction to exist even if absent in the source.
-        if "DepthArea" in self._feature_attribute_bindings:
-            self._feature_attribute_bindings["DepthArea"].update(
-                {"depthRangeMinimumValue", "depthRangeMaximumValue", "restriction"}
-            )
-            for attr in ["depthRangeMinimumValue", "depthRangeMaximumValue", "restriction"]:
-                if attr not in self._simple_attribute_codes:
-                    self._simple_attribute_codes.append(attr)
-
-        # Hazard rules (UnderwaterAwashRock/Obstruction) expect these optional
-        # attributes to exist, even if they are empty in the source data.
-        hazard_attrs = {"defaultClearanceDepth", "surroundingDepth", "waterLevelEffect"}
-        for hazard_code in ["UnderwaterAwashRock", "Obstruction", "Wreck"]:
-            if hazard_code in self._feature_attribute_bindings:
-                self._feature_attribute_bindings[hazard_code].update(hazard_attrs)
-                for attr in hazard_attrs:
-                    if attr not in self._simple_attribute_codes:
-                        self._simple_attribute_codes.append(attr)
-
-        # SeabedArea rules expect waterLevelEffect even when absent in data.
-        seabed_attrs = {"waterLevelEffect", "surfaceCharacteristics"}
-        if "SeabedArea" in self._feature_attribute_bindings:
-            self._feature_attribute_bindings["SeabedArea"].update(seabed_attrs)
-            for attr in seabed_attrs:
-                if attr not in self._simple_attribute_codes:
-                    self._simple_attribute_codes.append(attr)
-
-        # ShorelineConstruction rules reference condition/category/waterLevelEffect.
-        shore_attrs = {"condition", "categoryOfShorelineConstruction", "waterLevelEffect"}
-        if "ShorelineConstruction" in self._feature_attribute_bindings:
-            self._feature_attribute_bindings["ShorelineConstruction"].update(shore_attrs)
-            for attr in shore_attrs:
-                if attr not in self._simple_attribute_codes:
-                    self._simple_attribute_codes.append(attr)
-        self._simple_attribute_codes.sort()
+        if profile:
+            t_after_types = perf_counter()
 
         # Reset cached Lua type info so the upcoming feature/attribute codes are seen.
         self.lua.execute("typeInfo = nil")
 
         self._initialize_context_parameters()
+        if profile:
+            t_after_context = perf_counter()
 
         feature_ids = self.lua.table_from(list(self._features.keys()))
-        print(f"[PORTRAY] feature codes={[f.code for f in self._features.values()]}")
+        self._log_debug(f"[PORTRAY] feature codes={[f.code for f in self._features.values()]}")
         portray_main = self.lua.globals().PortrayalMain
         portray_main(feature_ids)
+        if profile:
+            t_after_lua = perf_counter()
+            self._last_portray_timing = {
+                "feature_list_s": t_after_list - start_total,
+                "metadata_s": t_after_metadata - t_after_list,
+                "type_inference_s": t_after_types - t_after_metadata,
+                "context_init_s": t_after_context - t_after_types,
+                "lua_portray_s": t_after_lua - t_after_context,
+                "total_s": t_after_lua - start_total,
+                "feature_count": float(len(feature_list)),
+            }
+        else:
+            self._last_portray_timing = {}
         return self._emitted
 
     def portray_with_json(
@@ -169,13 +215,14 @@ class PortrayalHost:
         sinks: Sequence[DrawingSink] | DrawingSink | None = None,
         *,
         compact_json: bool = True,
+        profile: bool = False,
     ) -> PortrayalResult:
         """Run portrayal, parse DEF strings into structured JSON, and fan out to sinks.
 
         Returns a PortrayalResult containing both raw DEF strings and parsed instructions.
         """
 
-        raw_map = self.portray(source)
+        raw_map = self.portray(source, profile=profile)
         parsed_map = self._parse_emitted(raw_map)
         parsed_json = {
             fid: [self._compact_json(instr, compact=compact_json) for instr in instructions]
@@ -196,6 +243,10 @@ class PortrayalHost:
 
         return PortrayalResult(raw=raw_map, parsed=parsed_map, parsed_json=parsed_json)
 
+    def get_last_portray_timing(self) -> Dict[str, float]:
+        """Return the most recent portrayal timing sample collected with profile=True."""
+        return dict(self._last_portray_timing)
+
     # ------------------------------------------------------------------
     # Lua environment setup
     # ------------------------------------------------------------------
@@ -211,12 +262,12 @@ class PortrayalHost:
         def _trace(msg):
             text = f"[Lua] {msg}"
             self._debug_logs.append(text)
-            print(text)
+            self._log_debug(text)
 
         def _trace_err(msg, depth=None):
             text = f"[Lua-err] {msg}"
             self._debug_logs.append(text)
-            print(text)
+            self._log_debug(text)
 
         lua.globals().Debug = lua.table()
         lua.globals().Debug.Trace = _trace
@@ -230,7 +281,7 @@ class PortrayalHost:
         def host_portrayal_emit(feature_ref, di_string, observed=None):
             feature_ref = str(feature_ref)
             di_string = str(di_string) if di_string else ""
-            self._emitted.setdefault(feature_ref, []).append(di_string)
+            self._emitted[feature_ref].append(di_string)
             return True
 
         lua.globals().HostPortrayalEmit = host_portrayal_emit
@@ -239,54 +290,54 @@ class PortrayalHost:
         lua.globals().HostGetFeatureIDs = self._host_get_feature_ids
         lua.globals().HostFeatureGetCode = self._host_feature_get_code
         lua.globals().HostGetFeatureTypeCodes = self._host_get_feature_type_codes
-        lua.globals().HostGetInformationTypeCodes = lambda: self.lua.table()
+        lua.globals().HostGetInformationTypeCodes = self._lua_empty_table
         lua.globals().HostGetSimpleAttributeTypeCodes = (
             self._host_get_simple_attribute_type_codes
         )
-        lua.globals().HostGetComplexAttributeTypeCodes = lambda: self.lua.table()
-        lua.globals().HostGetRoleTypeCodes = lambda: self.lua.table()
-        lua.globals().HostGetInformationAssociationTypeCodes = lambda: self.lua.table()
-        lua.globals().HostGetFeatureAssociationTypeCodes = lambda: self.lua.table()
+        lua.globals().HostGetComplexAttributeTypeCodes = self._lua_empty_table
+        lua.globals().HostGetRoleTypeCodes = self._lua_empty_table
+        lua.globals().HostGetInformationAssociationTypeCodes = self._lua_empty_table
+        lua.globals().HostGetFeatureAssociationTypeCodes = self._lua_empty_table
 
         lua.globals().HostGetFeatureTypeInfo = self._host_get_feature_type_info
-        lua.globals().HostGetInformationTypeInfo = lambda code: None
+        lua.globals().HostGetInformationTypeInfo = self._lua_none
         lua.globals().HostGetSimpleAttributeTypeInfo = (
             self._host_get_simple_attribute_type_info
         )
-        lua.globals().HostGetComplexAttributeTypeInfo = lambda code: None
-        lua.globals().HostGetRoleTypeInfo = lambda code: None
-        lua.globals().HostGetInformationAssociationTypeInfo = lambda code: None
-        lua.globals().HostGetFeatureAssociationTypeInfo = lambda code: None
+        lua.globals().HostGetComplexAttributeTypeInfo = self._lua_none
+        lua.globals().HostGetRoleTypeInfo = self._lua_none
+        lua.globals().HostGetInformationAssociationTypeInfo = self._lua_none
+        lua.globals().HostGetFeatureAssociationTypeInfo = self._lua_none
         lua.globals().HostFeatureGetSimpleAttribute = self._host_feature_get_simple_attribute
-        lua.globals().HostFeatureGetComplexAttributeCount = lambda feature_id, path, code: 0
+        lua.globals().HostFeatureGetComplexAttributeCount = self._lua_zero
         lua.globals().HostFeatureGetSpatialAssociations = (
             self._host_feature_get_spatial_associations
         )
         lua.globals().HostFeatureGetAssociatedFeatureIDs = (
-            lambda feature_id, association_code, role_code=None: self.lua.table()
+            self._lua_empty_table
         )
         lua.globals().HostFeatureGetAssociatedInformationIDs = (
-            lambda feature_id, association_code, role_code=None: self.lua.table()
+            self._lua_empty_table
         )
         lua.globals().HostSpatialGetAssociatedInformationIDs = (
-            lambda spatial_id, association_code, role_code=None: self.lua.table()
+            self._lua_empty_table
         )
         lua.globals().HostSpatialGetAssociatedFeatureIDs = (
-            lambda spatial_id: self.lua.table()
+            self._lua_empty_table
         )
         lua.globals().HostInformationTypeGetSimpleAttribute = (
-            lambda information_id, path, code: self.lua.table()
+            self._lua_empty_table
         )
         lua.globals().HostInformationTypeGetComplexAttributeCount = (
-            lambda information_id, path, code: 0
+            self._lua_zero
         )
         lua.globals().HostInformationGetAssociatedInformationIDs = (
-            lambda information_id, association_code, role_code=None: self.lua.table()
+            self._lua_empty_table
         )
         lua.globals().HostGetSpatial = self._host_get_spatial
 
         # Optional helper used by some rules.
-        lua.globals().HostFeatureNameParts = lambda feature_ref: None
+        lua.globals().HostFeatureNameParts = self._lua_none
 
         # Load Lua catalogue core files.
         for module_name in [
@@ -312,8 +363,7 @@ class PortrayalHost:
             param_type = self._context_type(value)
             default_str = self._context_value_to_string(value)
             lines.append(
-                f"params[{idx}] = PortrayalCreateContextParameter('" +
-                name + "','" + param_type + "','" + default_str + "')"
+                f"params[{idx}] = PortrayalCreateContextParameter('{name}','{param_type}','{default_str}')"
             )
             idx += 1
 
@@ -322,9 +372,7 @@ class PortrayalHost:
         # Apply explicit values (ConvertEncodedValue handles typing in Lua)
         for name, value in self.context.items():
             value_str = self._context_value_to_string(value)
-            lines.append(
-                f"PortrayalSetContextParameter('" + name + "','" + value_str + "')"
-            )
+            lines.append(f"PortrayalSetContextParameter('{name}','{value_str}')")
 
         script = "\n".join(lines)
         try:
@@ -339,21 +387,77 @@ class PortrayalHost:
     def _host_get_feature_ids(self) -> Any:
         return self.lua.table_from(list(self._features.keys()))
 
+    def _log_debug(self, message: str) -> None:
+        if self.debug:
+            print(message)
+
+    def _lua_empty_table(self, *args, **kwargs):
+        del args, kwargs
+        return self.lua.table()
+
+    @staticmethod
+    def _lua_none(*args, **kwargs):
+        del args, kwargs
+        return None
+
+    @staticmethod
+    def _lua_zero(*args, **kwargs):
+        del args, kwargs
+        return 0
+
+    def _initialize_feature_type_metadata(self, feature_list: List[FeatureRecord]) -> None:
+        feature_codes: set[str] = set()
+        simple_attrs: set[str] = set()
+        bindings: dict[str, set[str]] = defaultdict(set)
+
+        for feature in feature_list:
+            feature_codes.add(feature.code)
+            attr_codes = set(feature.attributes.keys())
+            simple_attrs.update(attr_codes)
+            bindings[feature.code].update(attr_codes)
+
+        self._feature_type_codes = sorted(feature_codes)
+        self._simple_attribute_codes = sorted(simple_attrs)
+        self._feature_attribute_bindings = {
+            code: bindings.get(code, set()) for code in self._feature_type_codes
+        }
+
+    def _apply_optional_attribute_bindings(self) -> None:
+        all_attrs = set(self._simple_attribute_codes)
+
+        for bindings in self._feature_attribute_bindings.values():
+            bindings.update(COMMON_OPTIONAL_ATTRIBUTES)
+        all_attrs.update(COMMON_OPTIONAL_ATTRIBUTES)
+
+        for code, attrs in FEATURE_OPTIONAL_ATTRIBUTES.items():
+            if code in self._feature_attribute_bindings:
+                self._feature_attribute_bindings[code].update(attrs)
+                all_attrs.update(attrs)
+
+        for code in BUOY_CODES:
+            if code in self._feature_attribute_bindings:
+                self._feature_attribute_bindings[code].add("topmark")
+                all_attrs.add("topmark")
+
+        self._simple_attribute_codes = sorted(all_attrs)
+
     def _host_feature_get_code(self, feature_id: str) -> str:
         return self._features[feature_id].code
 
     def _host_get_feature_type_codes(self):
-        print(f"[PORTRAY] HostGetFeatureTypeCodes -> {self._feature_type_codes}")
+        self._log_debug(f"[PORTRAY] HostGetFeatureTypeCodes -> {self._feature_type_codes}")
         return self.lua.table_from(self._feature_type_codes)
 
     def _host_get_simple_attribute_type_codes(self):
         return self.lua.table_from(self._simple_attribute_codes)
 
     def _host_get_feature_type_info(self, code: str):
-        print(f"[PORTRAY] HostGetFeatureTypeInfo({code}) with bindings {self._feature_attribute_bindings.get(code)}")
+        self._log_debug(
+            f"[PORTRAY] HostGetFeatureTypeInfo({code}) with bindings {self._feature_attribute_bindings.get(code)}"
+        )
         bindings = self.lua.table()
-        for attr in self._feature_attribute_bindings.get(code, []):
-            upper = 10 if attr == "restriction" else 1
+        for attr in sorted(self._feature_attribute_bindings.get(code, [])):
+            upper = 10 if attr == "restriction" or attr in MULTIVALUED_ATTRIBUTES else 1
             bindings[attr] = self.lua.table(UpperMultiplicity=upper)
 
         return self.lua.table(AttributeBindings=bindings)
@@ -368,7 +472,14 @@ class PortrayalHost:
         self, feature_id: str, path: str, attribute_code: str
     ) -> Any:
         feature = self._features[feature_id]
-        return self.lua.table_from(feature.to_simple_attribute(attribute_code))
+        values = feature.to_simple_attribute(attribute_code)
+
+        # Convert numerics to strings only when Lua expects encoded numeric
+        # types; keep enumerations numeric so catalogue comparisons succeed.
+        value_type = self._attribute_value_types.get(attribute_code)
+        if value_type in {"real", "integer"}:
+            values = [str(v) if isinstance(v, (int, float)) else v for v in values]
+        return self._to_lua_sequence(values)
 
     def _host_feature_get_spatial_associations(self, feature_id: str):
         feature = self._features[feature_id]
@@ -412,6 +523,22 @@ class PortrayalHost:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _to_lua_value(self, value: Any):
+        if isinstance(value, dict):
+            tbl = self.lua.table()
+            for k, v in value.items():
+                tbl[k] = self._to_lua_value(v)
+            return tbl
+        if isinstance(value, (list, tuple)):
+            return self._to_lua_sequence(value)
+        return value
+
+    def _to_lua_sequence(self, seq: Iterable[Any]):
+        tbl = self.lua.table()
+        for idx, item in enumerate(seq, start=1):
+            tbl[idx] = self._to_lua_value(item)
+        return tbl
+
     @staticmethod
     def _context_type(value: Any) -> str:
         if isinstance(value, bool):
@@ -442,20 +569,23 @@ class PortrayalHost:
         return {k: v for k, v in instr.items() if v is not None and v != ""}
 
     @staticmethod
+    def _classify_attribute_value_type(attr: str, value: Any) -> str:
+        if attr in ENUMERATED_ATTRIBUTES:
+            return "enumeration"
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)):
+            return "real"
+        return "text"
+
+    @staticmethod
     def _infer_attribute_value_types(features: List[FeatureRecord]) -> Dict[str, str]:
         value_types: Dict[str, str] = {}
-
-        def classify(value: Any) -> str:
-            if isinstance(value, bool):
-                return "boolean"
-            if isinstance(value, (int, float)):
-                return "real"
-            return "text"
 
         for feature in features:
             for attr, raw_value in feature.attributes.items():
                 # Preserve strongest numeric classification if mixed types appear.
-                new_type = classify(raw_value)
+                new_type = PortrayalHost._classify_attribute_value_type(attr, raw_value)
                 current = value_types.get(attr)
                 if current == "real":
                     continue

@@ -1,5 +1,3 @@
-version: '3.8'
-
 volumes:
   postgres-data:
 
@@ -30,32 +28,39 @@ services:
       - postgres-data:/var/lib/postgresql/data
     env_file:
         - .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h 127.0.0.1 -p ${POSTGRES_PORT}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
     # Add "forwardPorts": ["5432"] to **devcontainer.json** to forward PostgreSQL locally.
     # (Adding the "ports" property to this file will not forward from a Codespace.)
 
   martin:
-    image: ghcr.io/maplibre/martin
+    image: ghcr.io/maplibre/martin:latest
     restart: unless-stopped
     depends_on:
-      - db
-    env_file:
-        - .env
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOSTNAME: ${POSTGRES_HOSTNAME}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+    # Reuse app's workspace mount. This avoids host-path translation issues when
+    # running docker compose from inside the devcontainer.
+    volumes_from:
+      - app:ro
     # Raise the open-file limit so Martin can build sprite sheets from
     # the ~717 SVGs per theme without hitting EMFILE (os error 24).
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
-    #volumes:
-      # Config generated from martin/martin.yaml
-      # - ../martin/martin.yaml:/martin.yaml:ro
-      # Sprite atlases built by: python -m sprites.build_sprites
-      #- ../sprites/out:/sprites:ro
-      # Roboto (or other) PBF font shards – place in fonts/ at workspace root
-      #- ../fonts:/fonts:ro
-      #- ../style/out:/style:ro
-    command: --config /martin.yaml --webui enable-for-all
+    command: --config /workspaces/s101-openenc/martin/martin.yaml
 
   adminer:
     image: adminer

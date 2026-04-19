@@ -28,6 +28,10 @@ A concise guide to convert S-57 ENCs into minimal S-101 tables and driving portr
 
 # Skip portrayal when you only want geometry + attributes
 .venv/bin/python -m injest.s57_to_s101 test_encs/US3WA01M/US3WA01M.000 --skip-portrayal --apply
+
+# Clear and re-run (drops/recreates schema, then ingests)
+./scripts/clear_s101.sh && \
+	.venv/bin/python -m injest.s57_to_s101 test_encs/US3WA01M/US3WA01M.000 --apply
 ```
 
 Key flags:

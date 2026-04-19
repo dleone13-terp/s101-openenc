@@ -22,3 +22,19 @@ def test_parse_unknown_tokens_and_numbers():
     assert di["LineWidth"] == 0.5
     assert di["Foo"] == "Bar"
     assert di["LooseToken"] == ""
+
+
+def test_parse_dash_and_text_fields():
+    di = parse_drawing_instruction(
+        "Dash:0,0.6;ColorFill:NODTA,0.5;TextInstruction:WRECK;"
+        "TextAlignHorizontal:left;LocalOffset:1.0,2.0;Rotation:45;FontColor:CHBLK;FontSize:3.5"
+    )
+
+    assert di["Dash"] == "0,0.6"
+    assert di["ColorFill"] == "NODTA,0.5"
+    assert di["TextInstruction"] == "WRECK"
+    assert di["TextAlignHorizontal"] == "left"
+    assert di["LocalOffset"] == "1.0,2.0"
+    assert di["Rotation"] == 45
+    assert di["FontColor"] == "CHBLK"
+    assert di["FontSize"] == 3.5

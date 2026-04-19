@@ -1,0 +1,112 @@
+---
+listen_addresses: 0.0.0.0:3000
+web_ui: enable-for-all
+
+# Future-ready static asset locations mounted by devcontainer compose.
+sprites:
+  paths:
+    - /workspaces/s101-openenc/sprites/out/day
+    - /workspaces/s101-openenc/sprites/out/dusk
+    - /workspaces/s101-openenc/sprites/out/night
+
+styles:
+  paths:
+    - /workspaces/s101-openenc/style
+
+# Enable fonts after at least one .ttf/.otf file exists in /workspaces/s101-openenc/fonts.
+# fonts:
+#   paths:
+#     - /workspaces/s101-openenc/fonts
+
+# Martin v1.3 postgres config format.
+postgres:
+  # Martin resolves environment variables in config YAML.
+  connection_string: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOSTNAME}:${POSTGRES_PORT}/${POSTGRES_DB}
+  auto_publish: false
+  default_srid: 4326
+  pool_size: 20
+  max_feature_count: 100000
+  auto_bounds: quick
+
+  # Explicitly pin layer ids and properties we want available in MVT.
+  tables:
+    enc_area:
+      schema: s101
+      table: enc_area_mvt
+      geometry_column: geom
+      srid: 4326
+      id_column: id
+      properties:
+        feature_code: text
+        di_jsonb: jsonb
+        ColorFill: text
+        ColorFillOpacity: double
+        AreaFillReference: text
+        LineInstruction: text
+        LineStyle: text
+        LineColor: text
+        Dash: text
+        LineWidth: double
+        TextInstruction: text
+        TextAlignHorizontal: text
+        TextAlignVertical: text
+        TextOffsetX: double
+        TextOffsetY: double
+        TextRotation: double
+        FontColor: text
+        FontSize: double
+        DrawingPriority: int
+        ViewingGroup: int
+    enc_point:
+      schema: s101
+      table: enc_point_mvt
+      geometry_column: geom
+      srid: 4326
+      id_column: id
+      properties:
+        feature_code: text
+        di_jsonb: jsonb
+        DrawingPriority: int
+        ViewingGroup: int
+        PointInstruction: text
+        TextInstruction: text
+        TextAlignHorizontal: text
+        TextAlignVertical: text
+        TextOffsetX: double
+        TextOffsetY: double
+        TextRotation: double
+        FontColor: text
+        FontSize: double
+    enc_sounding:
+      schema: s101
+      table: enc_sounding_mvt
+      geometry_column: geom
+      srid: 4326
+      id_column: id
+      properties:
+        feature_code: text
+        di_jsonb: jsonb
+    enc_line:
+      schema: s101
+      table: enc_line_mvt
+      geometry_column: geom
+      srid: 4326
+      id_column: id
+      properties:
+        feature_code: text
+        di_jsonb: jsonb
+        LineInstruction: text
+        LineStyle: text
+        LineColor: text
+        Dash: text
+        LineWidth: double
+        TextInstruction: text
+        TextAlignHorizontal: text
+        TextAlignVertical: text
+        TextOffsetX: double
+        TextOffsetY: double
+        TextRotation: double
+        FontColor: text
+        FontSize: double
+        DrawingPriority: int
+        ViewingGroup: int
