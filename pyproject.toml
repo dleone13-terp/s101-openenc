@@ -32,5 +32,7 @@ include = [
     "injest",
     "injest.*",
     "portrayal_engine",
-    "portrayal_engine.*"
+    "portrayal_engine.*",
+    "style",
+    "style.*"
 ]

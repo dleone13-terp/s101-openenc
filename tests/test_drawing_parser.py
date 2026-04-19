@@ -22,3 +22,11 @@ def test_parse_unknown_tokens_and_numbers():
     assert di["LineWidth"] == 0.5
     assert di["Foo"] == "Bar"
     assert di["LooseToken"] == ""
+
+
+def test_parse_decodes_def_encoding_and_lists():
+    di = parse_drawing_instruction("ViewingGroup:23,27070;TextInstruction:Fl(2)R&m10s;Hover:true")
+
+    assert di["ViewingGroup"] == [23, 27070]
+    assert di["TextInstruction"] == "Fl(2)R,10s"
+    assert di["Hover"] is True

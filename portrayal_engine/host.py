@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Protocol, Sequence
 
 from lupa import LuaRuntime
 
 # The portrayal catalogue lives here relative to repo root.
 RULES_DIR = Path("portrayal/PortrayalCatalog/Rules")
+CATALOG_CORE_MODULES = [
+    "S100Scripting",
+    "PortrayalModel",
+    "PortrayalAPI",
+    "Default",
+    "main",
+]
 
 # Opinionated fixed context parameters (ingest-time, not mariner configurable here).
 DEFAULT_CONTEXT: Mapping[str, Any] = {
@@ -94,6 +102,7 @@ class PortrayalHost:
         self._simple_attribute_codes: List[str] = []
         self._feature_attribute_bindings: Dict[str, set[str]] = {}
         self._attribute_value_types: Dict[str, str] = {}
+        self._catalog_available = True
 
         self._setup_lua()
 
@@ -103,6 +112,10 @@ class PortrayalHost:
     def portray(self, features: Iterable[FeatureRecord]) -> Dict[str, List[str]]:
         """Run portrayal for the provided features and return DEF strings per feature_id."""
         feature_list = list(features)
+        if not self._catalog_available:
+            self._emitted = self._fallback_portray(feature_list)
+            return self._emitted
+
         self._features = {f.feature_id: f for f in feature_list}
         self._spatial_index = {}
         self._emitted = {}
@@ -289,14 +302,24 @@ class PortrayalHost:
         lua.globals().HostFeatureNameParts = lambda feature_ref: None
 
         # Load Lua catalogue core files.
-        for module_name in [
-            "S100Scripting",
-            "PortrayalModel",
-            "PortrayalAPI",
-            "Default",
-            "main",
-        ]:
-            lua.execute(f"require('{module_name}')")
+        if not RULES_DIR.exists():
+            self._catalog_available = False
+            print(
+                f"[PORTRAY] rules dir missing at {RULES_DIR}. "
+                "Using built-in fallback portrayal."
+            )
+            return
+
+        try:
+            for module_name in CATALOG_CORE_MODULES:
+                lua.execute(f"require('{module_name}')")
+        except Exception as exc:
+            self._catalog_available = False
+            print(
+                f"[PORTRAY] failed to load S-101 catalogue modules ({exc}). "
+                "Using built-in fallback portrayal."
+            )
+            return
 
         # Reinstall debug hooks (S100Scripting overrides Debug table).
         lua.globals().Debug.Trace = _trace
@@ -465,6 +488,49 @@ class PortrayalHost:
 
         return value_types
 
+    @staticmethod
+    def _fallback_portray(features: List[FeatureRecord]) -> Dict[str, List[str]]:
+        """Fallback portrayal when the external Lua catalogue is unavailable."""
+
+        emitted: Dict[str, List[str]] = {}
+        for feature in features:
+            base = [
+                "ViewingGroup:21010",
+                "DrawingPriority:15",
+                "DisplayPlane:UnderRadar",
+            ]
+            if feature.code == "DepthArea":
+                color = _fallback_depth_fill(feature.attributes)
+                base[0] = "ViewingGroup:13030"
+                base[1] = "DrawingPriority:3"
+                base.append(f"ColorFill:{color}")
+            elif feature.primitive == "Curve":
+                base.append("LineInstruction:QUESMRK1")
+                base.append("LineColor:CHBLK")
+            elif feature.primitive == "Point":
+                base.append("PointInstruction:QUESMRK1")
+            else:
+                base.append("NullInstruction")
+            emitted[feature.feature_id] = [";".join(base)]
+        return emitted
+
+
+def _fallback_depth_fill(attributes: Mapping[str, Any]) -> str:
+    depth = attributes.get("depthRangeMinimumValue")
+    try:
+        value = float(depth)
+    except (TypeError, ValueError):
+        return "NODTA"
+    if value < 0:
+        return "DEPIT"
+    if value < 2:
+        return "DEPVS"
+    if value < 5:
+        return "DEPMS"
+    if value < 10:
+        return "DEPMD"
+    return "DEPDW"
+
 
 def parse_drawing_instruction(di_string: str) -> Dict[str, Any]:
     """Parse a semicolon-delimited DEF string into a flat key/value map (no raw echo)."""
@@ -481,10 +547,8 @@ def parse_drawing_instruction(di_string: str) -> Dict[str, Any]:
         key = key.strip()
         value = value.strip()
 
-        num = _as_int(value)
-        if num is None:
-            num = _as_float(value)
-        fields[key] = num if num is not None else value
+        parsed = _parse_di_value(value)
+        fields[key] = parsed
 
     return dict(fields)
 
@@ -501,3 +565,42 @@ def _as_float(value: str) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_di_value(value: str) -> Any:
+    parts = _split_def_csv(value)
+    parsed_parts = [_parse_scalar(p) for p in parts]
+    if len(parsed_parts) == 1:
+        return parsed_parts[0]
+    return parsed_parts
+
+
+def _split_def_csv(value: str) -> List[str]:
+    if "," not in value:
+        return [_decode_def_string(value)]
+    return [_decode_def_string(part.strip()) for part in value.split(",")]
+
+
+def _parse_scalar(value: str) -> Any:
+    lowered = value.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    num = _as_int(value)
+    if num is not None:
+        return num
+    num = _as_float(value)
+    if num is not None and re.match(r"^-?\d+(\.\d+)?$", value):
+        return num
+    return value
+
+
+def _decode_def_string(value: str) -> str:
+    # Decode order matters: &a must be last.
+    return (
+        value.replace("&s", ";")
+        .replace("&c", ":")
+        .replace("&m", ",")
+        .replace("&a", "&")
+    )

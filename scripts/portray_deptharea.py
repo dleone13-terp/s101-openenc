@@ -89,11 +89,8 @@ def build_deptharea_source(
     )
 
 
-def _serialize_parsed(parsed_map: dict[str, list]) -> dict[str, list]:
-    return {
-        feature_id: [di.to_json(compact=True) for di in instructions]
-        for feature_id, instructions in parsed_map.items()
-    }
+def _serialize_parsed(parsed_map: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    return {feature_id: instructions for feature_id, instructions in parsed_map.items()}
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -152,7 +149,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             conn,
             table="raw_s57.depare",
             id_column="ogc_fid",
-            di_column="di_def",
             json_column="di_jsonb",
             jsonb=True,
             feature_id_to_key=source.id_map,
@@ -175,7 +171,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     json_sample = next(iter(parsed_map.values()), [])
     if json_sample:
         print("Sample parsed JSON instruction:")
-        print(json.dumps(json_sample[0].to_json(), indent=2))
+        print(json.dumps(json_sample[0], indent=2))
 
     if args.json_out:
         payload = _serialize_parsed(parsed_map)

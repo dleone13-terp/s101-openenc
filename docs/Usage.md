@@ -14,7 +14,16 @@ This will create all of the sprites in colored svg format in the sprites/out/{Th
 python -m style.build_style
 ```
 
-This will create the three styles in style/out/{Theme}.json
+This creates day/dusk/night MapLibre styles in `style/out/enc-{theme}.json`.
+
+Optional flags:
+
+```bash
+python -m style.build_style \
+  --tile-base-url http://localhost:3000 \
+  --tokens-json /path/to/parsed_di.json \
+  --palette-dir /path/to/colorProfiles
+```
 
 ## Portrayal Host (S-101)
 

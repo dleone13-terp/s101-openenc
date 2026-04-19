@@ -13,6 +13,13 @@ from typing import Dict, Set, Tuple
 FEATURE_MAP: Dict[str, Tuple[str, str]] = {
     "DEPARE": ("DepthArea", "Surface"),
     "DEPCNT": ("DepthContour", "Curve"),
+    "SOUNDG": ("Sounding", "Point"),
+    "OBSTRN": ("Obstruction", "Point"),
+    "WRECKS": ("Wreck", "Point"),
+    "UWTROC": ("UnderwaterAwashRock", "Point"),
+    "SBDARE": ("SeabedArea", "Surface"),
+    "SLCONS": ("ShorelineConstruction", "Curve"),
+    "LNDARE": ("LandArea", "Surface"),
 }
 
 # Attribute crosswalks per S-57 object. Keys are S-57 attribute acronyms; values
@@ -26,6 +33,38 @@ ATTRIBUTE_MAP: Dict[str, Dict[str, str]] = {
     },
     "DEPCNT": {
         "VALDCO": "valueOfDepthContour",
+        "QUAPOS": "qualityOfPosition",
+    },
+    "SOUNDG": {
+        "VALSOU": "valueOfSounding",
+        "QUASOU": "qualityOfSoundingMeasurement",
+        "TECSOU": "techniqueOfSoundingMeasurement",
+    },
+    "OBSTRN": {
+        "VALSOU": "valueOfSounding",
+        "WATLEV": "waterLevelEffect",
+        "CATOBS": "categoryOfObstruction",
+        "QUASOU": "qualityOfSoundingMeasurement",
+    },
+    "WRECKS": {
+        "VALSOU": "valueOfSounding",
+        "WATLEV": "waterLevelEffect",
+        "CATWRK": "categoryOfWreck",
+        "QUASOU": "qualityOfSoundingMeasurement",
+    },
+    "UWTROC": {
+        "VALSOU": "valueOfSounding",
+        "WATLEV": "waterLevelEffect",
+    },
+    "SBDARE": {
+        "NATSUR": "surfaceCharacteristics",
+        "WATLEV": "waterLevelEffect",
+        "QUAPOS": "qualityOfPosition",
+    },
+    "SLCONS": {
+        "CATSLC": "categoryOfShorelineConstruction",
+        "CONDTN": "condition",
+        "WATLEV": "waterLevelEffect",
         "QUAPOS": "qualityOfPosition",
     },
 }
